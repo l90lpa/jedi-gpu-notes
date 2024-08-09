@@ -1,14 +1,15 @@
 # JEDI Development Environment Set-up on Ubuntu 22.04 with GCC Offload Support
 
-## 0. Provisioning an Azure VM
+## 0. Provision an Azure VM
 Follow the Azure documentation with the following modifications:
 - When selecting a VM we chose `Standard NC6s v3`
 - When selecting an operating system we chose `Ubuntu Server 22.04 LTS - x64 Gen2`
+- When selecting a disc size we chose 256 GiB to support building spack-stack and JEDI
 
 References:
 - [Quickstart: Create a Linux virtual machine in the Azure portal](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/quick-create-portal?tabs=ubuntu)
 
-## 1. Nvidia Drivers Installtion
+## 1. Install Nvidia Drivers
 
 Install the Nvidia Drivers as follows:
 
@@ -36,9 +37,9 @@ Install the Nvidia Drivers as follows:
 
 References:
 - [Azure N-Series Linux VM Driver Installation](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/n-series-driver-setup)
-- [Ubuntu Driver Installtion](https://ubuntu.com/server/docs/nvidia-drivers-installation)
+- [Ubuntu Driver Installation](https://ubuntu.com/server/docs/nvidia-drivers-installation)
 
-## 2. CUDA Toolkit Installation
+## 2. Install CUDA Toolkit
 
 Assuming that you have Nvidia drivers installed, install the CUDA Toolkit as follows:
 
@@ -108,14 +109,50 @@ References:
    sudo apt install -y gcc-12 g++-12 gfortran-12 gcc-12-offload-nvptx
    ```
 
-## 4. Set-Up Spack-Stack
+## 4. Set up Spack-Stack
 
-Set-up Spack-Stack as per its documentation (see [Ubuntu Prerequisites](https://spack-stack.readthedocs.io/en/latest/NewSiteConfigs.html#prerequisites-ubuntu-one-off) and [Create a new environment](https://spack-stack.readthedocs.io/en/latest/NewSiteConfigs.html#newsiteconfigs-linux-createenv)) with the following modifications:
+Set up spack-stack as per its documentation (see [Ubuntu Prerequisites](https://spack-stack.readthedocs.io/en/1.7.0/NewSiteConfigs.html#prerequisites-ubuntu-one-off) and [Create a new environment](https://spack-stack.readthedocs.io/en/1.7.0/NewSiteConfigs.html#newsiteconfigs-linux-createenv)) with the following modifications:
 - (optional) When installing the prerequisites, you can skip the installation of the compilers `gcc g++ gfortran` which will install gcc-11 on Ubuntu 22.04.
-- When creating an envionment:
+- When cloning spack-stack, make sure to specify the latest stable release `v1.7.0` to avoid any breakage on the develop branch:
+    - clone via `git clone -b release/1.7.0 --recurse-submodules https://github.com/jcsda/spack-stack.git`
+    - make sure to follow the setup instructions _for v1.7.0_ as in the links above — check the lower-right corner of the webpage for the documentation version
+- When creating the envionment:
     - at step (5): verify that gcc-12 was found
     - at step (7): run `gcc-12 --version` and use the reported version as `YOUR-VERSION`
     - (optional) at step (10): for the jedi-bundle branch `feature/gpu-offload-example` you only need to install the spack metapackage `jedi-base-env`.
 
-**Note**: becuase the jedi-bundle branch `feature/gpu-offload-example` manually builds Atlas, after loading packages through `module` you should do a `module unload ecmwf-atlas` to remove it from various paths to avoid a conflict with the one built in jedi-bundle. The manual build of Atlas is due to the anticipation that we may end up using a custom branch of Atlas.
+Then load the spack-stack environment (you may want to add these to `.profile` or `.bashrc` etc):
+
+```
+export SPACK_STACK_DIR="path/to/spack-stack"
+module use "${SPACK_STACK_DIR}/envs/azure-skylab-dev/install/modulefiles/Core"
+module purge
+module load stack-gcc/12.3.0
+module load stack-mpich/4.1.2
+module load stack-python/3.10.13
+module load jedi-base-env
+module --no-auto --force unload ecmwf-atlas  # unload atlas with minimal dependency tracking
+module load qhull  # reload atlas dependency
+```
+
+**Note**: We anticipate that the GPU project will end up using custom branches of atlas. That's why we unload the spack-stack atlas module above, and build atlas within jedi-bundle in the section below.
+
+## 5. Build JEDI
+
+Clone and build the jedi-bundle on branch `feature/gpu-offload-example`; this adds in-bundle atlas, trims the bundle to the repos needed to demonstrate GPU offload in saber, and sets up the GPU offload build environment.
+
+```
+mkdir jedi && cd jedi
+git clone -b feature/gpu-offload-example https://github.com/JCSDA-internal/jedi-bundle
+mkdir build && cd build
+ecbuild ../jedi-bundle
+make -j6
+ctest
+```
+
+In this branch, the oops helper `util::multiplyFieldSet` is offloaded to GPU. This can be triggered, for example, in the ctest `saber_test_dirac_stddev_1_1-1`
+
+**Note**: the atlas ctest `atlas_fctest_field_host` is expected to fail because of a bug in the test itself (atlas issue #216)
+    
+
 
